@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">MoneyStat</string>
+    <string name="title_activity_main">MoneyStat</string>
+    <string name="package_name">app.moneystat.mobile</string>
+    <string name="custom_url_scheme">app.moneystat.mobile</string>
+</resources>
