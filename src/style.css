@@ -87,10 +87,66 @@ select {
 input {
   width: 100%;
 }
+select {
+  cursor: pointer;
+  appearance: none;
+  padding-right: 34px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2352765a' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+select:hover { border-color: #95bfa4; }
+@supports (appearance: base-select) {
+  select, select::picker(select) { appearance: base-select; }
+  select { background-image: none; padding-right: 13px; }
+  select::picker-icon { color: #52765a; }
+  select::picker(select) {
+    border: 1px solid #dce5dc;
+    border-radius: 12px;
+    background: #fff;
+    color: #334e40;
+    box-shadow: 0 10px 28px #283e361a;
+    padding: 5px;
+    max-height: 280px;
+    overflow: auto;
+  }
+  select option { padding: 10px 12px; border-radius: 7px; }
+  select option:checked { background: #e6f0e5; color: #2c7057; }
+  select option:hover, select option:focus { background: #f0f5ed; }
+}
 input[type="color"] {
   padding: 4px;
   height: 42px;
 }
+.category-appearance { display: grid; gap: 12px; min-width: 0; }
+.appearance-preview { display: flex; align-items: center; gap: 12px; }
+.appearance-preview > div { flex: 1; }
+.appearance-preview small { display: block; margin-top: 4px; }
+.appearance-preview > label { width: 72px; }
+.icon-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(68px, 1fr));
+  gap: 6px;
+  max-height: 230px;
+  overflow-y: auto;
+  padding: 4px;
+  border: 1px solid #e1e8e1;
+  border-radius: 12px;
+  background: #f7f9f5;
+}
+.icon-gallery button { flex-direction: column; padding: 10px 3px; gap: 6px; min-width: 0; }
+.icon-gallery button span { font-size: 10px; overflow-wrap: anywhere; }
+.icon-gallery button.chosen { border: 2px solid #2c7057; background: #e6f0e5; }
+.inline-category { display: grid; gap: 16px; padding: 14px; border: 1px solid #dce5dc; border-radius: 12px; background: #fbfcf9; }
+.import-preview { margin-top: 18px; padding: 16px; background: #f4f8f0; border: 1px solid #dce5dc; border-radius: 12px; }
+.import-preview p { line-height: 1.6; }
+.import-preview summary { cursor: pointer; margin-bottom: 12px; }
+.telegram-sync code { padding: 2px 5px; border-radius: 5px; background: #eef4eb; }
+.telegram-preview { display: grid; gap: 10px; margin-top: 18px; padding: 15px; border: 1px solid #dce5dc; border-radius: 12px; background: #f7faf5; }
+.telegram-preview > div { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 10px; border-bottom: 1px solid #e6ece3; }
+.telegram-preview span { min-width: 0; }
+.telegram-preview small { display: block; margin-top: 5px; overflow-wrap: anywhere; }
+.telegram-preview strong { white-space: nowrap; }
 label {
   display: flex;
   flex-direction: column;
@@ -220,6 +276,8 @@ header {
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 22px;
   gap: 12px;
@@ -228,6 +286,10 @@ header {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 4px;
+  border: 1px solid #dce5dc;
+  border-radius: 12px;
+  background: #fff;
 }
 .period button {
   padding: 8px;
@@ -241,7 +303,7 @@ header {
   max-width: 190px;
 }
 .toolbar > select {
-  background: transparent;
+  background-color: #fff;
   min-width: 160px;
 }
 .summary {
@@ -970,7 +1032,7 @@ footer {
     min-width: 0;
     max-width: 145px;
     font-size: 11px;
-    padding: 8px;
+    padding: 8px 28px 8px 8px;
   }
   .period {
     gap: 0;

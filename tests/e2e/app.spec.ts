@@ -51,6 +51,6 @@ test("доход, расход, валютный перевод, перезап�
   const download = await downloadEvent;
   const path = await download.path();
   page.on("dialog", (dialog) => dialog.accept());
-  await page.locator("input[type=file]").setInputFiles(path!);
+  await page.locator('input[accept=".json,application/json"]').setInputFiles(path!);
   await expect(page.getByRole("status")).toContainText("восстановлена");
 });

@@ -5,6 +5,8 @@ import {
   money,
   balance,
   totals,
+  convert,
+  changeAccountCurrency,
   validate,
   type State,
 } from "../src/model";
@@ -15,6 +17,35 @@ beforeEach(async () => {
   await db.data.clear();
 });
 describe("финансовый учёт", () => {
+  it("сводит разные валюты в выбранную валюту без повторного округления", () => {
+    s.accounts.push({ id: "usd", name: "USD", currency: "USD", opening: 0 });
+    s.entries = [
+      { id: "r", kind: "expense", accountId: s.accounts[0].id, amount: 9000, date: "2026-10-01", note: "", categoryId: s.categories[0].id },
+      { id: "u", kind: "expense", accountId: "usd", amount: 100, date: "2026-10-01", note: "", categoryId: s.categories[0].id },
+    ];
+    expect(totals(s, s.entries, "USD").expense).toBe(200);
+    expect(totals(s, s.entries, "EUR").expense).toBe(180);
+    expect(convert(s, 12345, "USD", "USD")).toBe(12345);
+  });
+  it("меняет валюту основного счёта и обе стороны его переводов, не меняя чужие суммы", () => {
+    s.accounts[0].opening = 90000;
+    s.accounts.push({ id: "other", name: "Другой", currency: "EUR", opening: 0 });
+    s.entries = [
+      { id: "out", kind: "transfer", accountId: s.accounts[0].id, toId: "other", amount: 9000, received: 90, date: "2026-10-01", note: "" },
+      { id: "in", kind: "transfer", accountId: "other", toId: s.accounts[0].id, amount: 90, received: 9000, date: "2026-10-01", note: "" },
+    ];
+    changeAccountCurrency(s, s.accounts[0].id, "USD");
+    expect(s.accounts[0].currency).toBe("USD");
+    expect(balance(s, s.accounts[0])).toBe(1000);
+    expect(s.entries.map((e) => [e.amount, e.received])).toEqual([[100, 90], [90, 100]]);
+    validate(s);
+  });
+  it("не меняет данные при недопустимом пересчёте валюты", () => {
+    s.entries = [{ id: "tiny", kind: "expense", accountId: s.accounts[0].id, amount: 1, date: "2026-10-01", note: "", categoryId: s.categories[0].id }];
+    const before = structuredClone(s);
+    expect(() => changeAccountCurrency(s, s.accounts[0].id, "USD")).toThrow();
+    expect(s).toEqual(before);
+  });
   it("разбирает деньги без дробных копеек", () => {
     expect(money("0,29")).toBe(29);
     expect(money("-12.04", true)).toBe(-1204);

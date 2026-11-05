@@ -7,21 +7,12 @@ import {
   Minus,
   Wallet,
   ChartPie,
+  BarChart3,
   Settings,
   ChevronLeft,
   ChevronRight,
   X,
   ShoppingBasket,
-  House,
-  Car,
-  Heart,
-  ShoppingBag,
-  PartyPopper,
-  Phone,
-  BookOpen,
-  BriefcaseBusiness,
-  TrendingUp,
-  Gift,
   Shapes,
   Trash2,
   Download,
@@ -32,34 +23,27 @@ import {
 } from "lucide-react";
 import {
   balance,
+  convert,
   id,
   money,
   rub,
   today,
   totals,
+  changeAccountCurrency,
   type State,
   type Kind,
   type Entry,
   type Category,
 } from "./model";
 import { load, change, restore } from "./store";
+import { CategoryAppearance, categoryIcons } from "./CategoryAppearance";
+import Analytics from "./Analytics";
+import HistoryImport from "./HistoryImport";
+import TelegramSync from "./TelegramSync";
+import { changeText, expenseReport, monthRange, shiftRange } from "./analyticsModel";
 import { Capacitor } from "@capacitor/core";
 import { Filesystem, Directory, Encoding } from "@capacitor/filesystem";
 import { Share } from "@capacitor/share";
-const icons: Record<string, LucideIcon> = {
-  food: ShoppingBasket,
-  home: House,
-  car: Car,
-  health: Heart,
-  bag: ShoppingBag,
-  fun: PartyPopper,
-  phone: Phone,
-  book: BookOpen,
-  work: BriefcaseBusiness,
-  chart: TrendingUp,
-  gift: Gift,
-  other: Shapes,
-};
 const fmt = (n: number, c = "RUB") =>
   new Intl.NumberFormat("ru-RU", {
     style: "currency",
@@ -72,7 +56,7 @@ const monthName = (value: string) =>
     year: "numeric",
   });
 function Symbol({ category }: { category?: Category }) {
-  const Icon = icons[category?.icon ?? "other"] ?? Shapes;
+  const Icon = categoryIcons[category?.icon ?? "other"] ?? Shapes;
   return <Icon size={22} />;
 }
 type Modal = Kind | "account" | "category" | null;
@@ -83,7 +67,11 @@ export default function App() {
     [modal, setModal] = useState<Modal>(null),
     [month, setMonth] = useState(today().slice(0, 7)),
     [account, setAccount] = useState("all"),
+    [displayMode, setDisplayMode] = useState("account"),
+    [periodMode, setPeriodMode] = useState("month"),
+    [day, setDay] = useState(today()),
     [category, setCategory] = useState("all"),
+    [hoverCategory, setHoverCategory] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState("");
   useEffect(() => {
@@ -109,6 +97,12 @@ export default function App() {
     }
   }
   function shift(n: number) {
+    if (periodMode === "day") {
+      const d = new Date(day + "T12:00:00");
+      d.setDate(d.getDate() + n);
+      setDay(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+      return;
+    }
     const d = new Date(month + "-02T12:00:00");
     d.setMonth(d.getMonth() + n);
     setMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
@@ -124,13 +118,18 @@ export default function App() {
   const state = s;
   const filtered = s.entries.filter(
     (e) =>
-      e.date.startsWith(month) &&
+      (periodMode === "day" ? e.date === day : e.date.startsWith(month)) &&
       (account === "all" || e.accountId === account || e.toId === account),
   );
-  const total = totals(s, filtered),
-    net = s.accounts
-      .filter((a) => account === "all" || a.id === account)
-      .reduce((sum, a) => sum + rub(s, balance(s, a), a.currency), 0);
+  const selectedAccount = s.accounts.find((a) => a.id === account),
+    displayCurrency =
+      displayMode === "account"
+        ? selectedAccount?.currency ?? "RUB"
+        : Object.hasOwn(s.rates, displayMode) ? displayMode : "RUB",
+    total = totals(s, filtered, displayCurrency),
+    net = selectedAccount
+      ? convert(s, balance(s, selectedAccount), selectedAccount.currency, displayCurrency)
+      : s.accounts.reduce((sum, a) => sum + convert(s, balance(s, a), a.currency, displayCurrency), 0);
   const groups = s.categories
     .filter((c) => c.kind === "expense")
     .map((c) => ({
@@ -138,6 +137,7 @@ export default function App() {
       value: totals(
         s,
         filtered.filter((e) => e.categoryId === c.id),
+        displayCurrency,
       ).expense,
     }))
     .filter((g) => g.value > 0)
@@ -153,6 +153,12 @@ export default function App() {
   const visible = filtered
     .filter((e) => category === "all" || e.categoryId === category)
     .sort((a, b) => b.date.localeCompare(a.date));
+  const hovered = s.categories.find((c) => c.id === hoverCategory);
+  const overviewMonth = periodMode === "day" ? day.slice(0, 7) : month;
+  const monthlyRange = monthRange(overviewMonth);
+  const previousMonthlyRange = shiftRange(monthlyRange, -1);
+  const monthlyCurrent = hovered ? expenseReport(s, monthlyRange, "month", [hovered.id], account, displayCurrency).total : 0;
+  const monthlyPrevious = hovered ? expenseReport(s, previousMonthlyRange, "month", [hovered.id], account, displayCurrency).total : 0;
   function open(m: Modal) {
     setError("");
     setModal(m);
@@ -207,6 +213,7 @@ export default function App() {
         return;
       setS(await restore(value));
       setAccount("all");
+      setDisplayMode("account");
       setCategory("all");
       setNotice("Резервная копия восстановлена.");
     } catch (e) {
@@ -226,6 +233,7 @@ export default function App() {
         <nav>
           {[
             ["overview", "Обзор", ChartPie],
+            ["analytics", "Аналитика", BarChart3],
             ["accounts", "Счета", Wallet],
             ["settings", "Настройки", Settings],
           ].map(([key, label, Icon]) => {
@@ -254,6 +262,8 @@ export default function App() {
             <h1>
               {tab === "overview"
                 ? "Деньги под контролем"
+                : tab === "analytics"
+                  ? "Аналитика расходов"
                 : tab === "accounts"
                   ? "Мои счета"
                   : "Всё по-вашему"}
@@ -261,6 +271,8 @@ export default function App() {
             <p className="subtitle">
               {tab === "overview"
                 ? "Маленькие привычки. Большие возможности."
+                : tab === "analytics"
+                  ? "Куда уходят деньги, как часто и что меняется."
                 : tab === "accounts"
                   ? "Каждому счёту — своя валюта."
                   : "Категории, курсы и резервные копии."}
@@ -289,22 +301,31 @@ export default function App() {
             </button>
           </div>
         )}
+        {tab === "analytics" && <Analytics state={s} />}
         {tab === "overview" && (
           <>
             <section className="toolbar">
               <div className="period">
-                <button aria-label="Предыдущий месяц" onClick={() => shift(-1)}>
+                <select aria-label="Период" value={periodMode} onChange={(e) => {
+                  setPeriodMode(e.target.value);
+                  if (e.target.value === "month") setMonth(day.slice(0, 7));
+                  else setDay(day.startsWith(month) ? day : month + "-01");
+                }}>
+                  <option value="month">Месяц</option>
+                  <option value="day">День</option>
+                </select>
+                <button aria-label={periodMode === "day" ? "Предыдущий день" : "Предыдущий месяц"} onClick={() => shift(-1)}>
                   <ChevronLeft size={20} />
                 </button>
                 <label>
-                  <span className="sr-only">Месяц</span>
+                  <span className="sr-only">{periodMode === "day" ? "День" : "Месяц"}</span>
                   <input
-                    type="month"
-                    value={month}
-                    onChange={(e) => e.target.value && setMonth(e.target.value)}
+                    type={periodMode === "day" ? "date" : "month"}
+                    value={periodMode === "day" ? day : month}
+                    onChange={(e) => e.target.value && (periodMode === "day" ? setDay(e.target.value) : setMonth(e.target.value))}
                   />
                 </label>
-                <button aria-label="Следующий месяц" onClick={() => shift(1)}>
+                <button aria-label={periodMode === "day" ? "Следующий день" : "Следующий месяц"} onClick={() => shift(1)}>
                   <ChevronRight size={20} />
                 </button>
               </div>
@@ -320,16 +341,20 @@ export default function App() {
                   </option>
                 ))}
               </select>
+              <select aria-label="Валюта отображения" value={displayMode} onChange={(e) => setDisplayMode(e.target.value)}>
+                <option value="account">Валюта счёта</option>
+                {Object.keys(s.rates).map((code) => <option key={code} value={code}>{code}</option>)}
+              </select>
             </section>
             <section className="summary">
               <div className="balance-card">
                 <div className="eyebrow">ОБЩИЙ БАЛАНС СЕЙЧАС</div>
-                <strong>{fmt(net)}</strong>
+                <strong>{fmt(net, displayCurrency)}</strong>
                 <span>
                   {account === "all"
                     ? `${s.accounts.length} счёт(а)`
                     : "Выбранный счёт"}{" "}
-                  · в рублях по текущему курсу
+                  · {displayCurrency} по текущему курсу
                 </span>
                 <Wallet className="watermark" size={100} />
               </div>
@@ -338,8 +363,8 @@ export default function App() {
                   <ArrowDownLeft />
                 </span>
                 <div>
-                  <p>Доходы за месяц</p>
-                  <strong className="green">{fmt(total.income)}</strong>
+                  <p>Доходы за {periodMode === "day" ? "день" : "месяц"}</p>
+                  <strong className="green">{fmt(total.income, displayCurrency)}</strong>
                 </div>
               </div>
               <div className="stat-card">
@@ -347,8 +372,8 @@ export default function App() {
                   <ArrowUpRight />
                 </span>
                 <div>
-                  <p>Расходы за месяц</p>
-                  <strong>{fmt(total.expense)}</strong>
+                  <p>Расходы за {periodMode === "day" ? "день" : "месяц"}</p>
+                  <strong>{fmt(total.expense, displayCurrency)}</strong>
                 </div>
               </div>
             </section>
@@ -361,6 +386,17 @@ export default function App() {
                 <div className="chart-content">
                   <div
                     className="donut"
+                    onMouseLeave={() => setHoverCategory(null)}
+                    onMouseMove={(event) => {
+                      const box = event.currentTarget.getBoundingClientRect();
+                      const x = event.clientX - box.left - box.width / 2;
+                      const y = event.clientY - box.top - box.height / 2;
+                      if (Math.hypot(x, y) < box.width * 0.38) { setHoverCategory(null); return; }
+                      const position = ((Math.atan2(x, -y) * 180 / Math.PI + 360) % 360) / 360;
+                      let sum = 0;
+                      const group = groups.find((g) => { sum += g.value / total.expense; return position < sum; });
+                      setHoverCategory(group?.c.id ?? null);
+                    }}
                     style={{
                       background: gradient
                         ? `conic-gradient(${gradient})`
@@ -368,8 +404,8 @@ export default function App() {
                     }}
                   >
                     <div className="donut-hole">
-                      <span>За {monthName(month).split(" ")[0]}</span>
-                      <strong>{fmt(total.expense)}</strong>
+                      <span>{periodMode === "day" ? new Date(day + "T12:00:00").toLocaleDateString("ru-RU") : monthName(month)}</span>
+                      <strong>{fmt(total.expense, displayCurrency)}</strong>
                       <small>
                         {groups.length
                           ? `${groups.length} категорий`
@@ -382,10 +418,16 @@ export default function App() {
                       groups.map((g) => (
                         <button
                           key={g.c.id}
+                          onMouseEnter={() => setHoverCategory(g.c.id)}
+                          onMouseLeave={() => setHoverCategory(null)}
+                          onFocus={() => setHoverCategory(g.c.id)}
+                          onBlur={() => setHoverCategory(null)}
+                          aria-describedby={hoverCategory === g.c.id ? "category-comparison" : undefined}
                           className={category === g.c.id ? "selected" : ""}
-                          onClick={() =>
-                            setCategory(category === g.c.id ? "all" : g.c.id)
-                          }
+                          onClick={() => {
+                            setCategory(category === g.c.id ? "all" : g.c.id);
+                            setHoverCategory(g.c.id);
+                          }}
                         >
                           <span
                             className="category-icon"
@@ -403,7 +445,7 @@ export default function App() {
                               расходов
                             </small>
                           </span>
-                          <b>{fmt(g.value)}</b>
+                          <b>{fmt(g.value, displayCurrency)}</b>
                         </button>
                       ))
                     ) : (
@@ -419,6 +461,12 @@ export default function App() {
                     )}
                   </div>
                 </div>
+                {hovered && <div className="category-comparison" id="category-comparison" role="tooltip">
+                  <b>{hovered.name} · {monthName(overviewMonth)}</b>
+                  <span>{fmt(monthlyCurrent, displayCurrency)} · {changeText(monthlyCurrent, monthlyPrevious, displayCurrency)}</span>
+                  <small>За {monthName(previousMonthlyRange.start.slice(0, 7))}: {fmt(monthlyPrevious, displayCurrency)}. Сравнение полных календарных месяцев по записанным расходам.</small>
+                  {overviewMonth === today().slice(0, 7) && <small>Текущий месяц ещё не завершён.</small>}
+                </div>}
                 <div className="actions">
                   <button
                     className="expense-button"
@@ -501,9 +549,18 @@ export default function App() {
               </div>
               {visible.length ? (
                 visible.map((e) => {
-                  const a = s.accounts.find((a) => a.id === e.accountId)!,
+                  const source = s.accounts.find((a) => a.id === e.accountId)!,
+                    target = s.accounts.find((a) => a.id === e.toId),
+                    contextual =
+                      selectedAccount && target?.id === selectedAccount.id
+                        ? target
+                        : source,
+                    amount =
+                      selectedAccount && target?.id === selectedAccount.id
+                        ? e.received!
+                        : e.amount,
                     c = s.categories.find((c) => c.id === e.categoryId),
-                    to = s.accounts.find((a) => a.id === e.toId);
+                    to = target;
                   return (
                     <div className="entry" key={e.id}>
                       <span
@@ -522,7 +579,7 @@ export default function App() {
                       <div className="entry-name">
                         <b>{e.kind === "transfer" ? "Перевод" : c?.name}</b>
                         <small>
-                          {a.name}
+                          {source.name}
                           {to ? ` → ${to.name}` : ""}
                           {e.note ? ` · ${e.note}` : ""}
                         </small>
@@ -544,9 +601,16 @@ export default function App() {
                             : e.kind === "expense"
                               ? "−"
                               : ""}
-                          {fmt(e.amount, a.currency)}
+                          {fmt(
+                            displayMode !== "account"
+                              ? convert(s, amount, contextual.currency, displayCurrency)
+                              : amount,
+                            displayMode !== "account" ? displayCurrency : contextual.currency,
+                          )}
                         </b>
-                        {to && <small>→ {fmt(e.received!, to.currency)}</small>}
+                        {to && displayMode === "account" && contextual.id === source.id && (
+                          <small>→ {fmt(e.received!, to.currency)}</small>
+                        )}
                       </div>
                       <button
                         className="delete"
@@ -583,6 +647,17 @@ export default function App() {
                   <Wallet />
                   <span className="currency-tag">{a.currency}</span>
                   <h2>{a.name}</h2>
+                  <label>
+                    Валюта счёта
+                    <select aria-label={`Валюта счёта ${a.name}`} value={a.currency} disabled={busy} onChange={async (e) => {
+                      const currency = e.target.value;
+                      if (currency === a.currency) return;
+                      if (!confirm(`Изменить валюту счёта «${a.name}» с ${a.currency} на ${currency}? Начальный баланс и все суммы операций этого счёта будут пересчитаны по текущему курсу. Суммы других счетов не изменятся.`)) return;
+                      await mutate((st) => changeAccountCurrency(st, a.id, currency));
+                    }}>
+                      {Object.keys(s.rates).map((code) => <option key={code}>{code}</option>)}
+                    </select>
+                  </label>
                   <strong>{fmt(balance(s, a), a.currency)}</strong>
                   <p>Начальный баланс: {fmt(a.opening, a.currency)}</p>
                   <small>
@@ -695,6 +770,15 @@ export default function App() {
                 независимые базы.
               </p>
             </section>
+            <HistoryImport backup={backup} replace={async (value) => {
+              setS(await restore(value));
+              setAccount("all"); setCategory("all"); setDisplayMode("account"); setHoverCategory(null);
+              setError(""); setPeriodMode("month");
+              const latest = value.entries.map((e) => e.date).sort().at(-1) ?? today();
+              setMonth(latest.slice(0, 7)); setDay(latest);
+              setNotice(`История Monefy импортирована. Все данные заменены: ${value.accounts.length} счетов, ${value.entries.length} операций.`);
+            }} />
+            <TelegramSync state={s} apply={mutate} />
             <section className="panel categories-panel">
               <div className="panel-heading">
                 <h2>Ваши категории</h2>
@@ -729,6 +813,8 @@ export default function App() {
       {modal && (
         <Editor
           kind={modal}
+          initialAccountId={selectedAccount?.id}
+          initialDate={periodMode === "day" ? day : today()}
           state={s}
           busy={busy}
           error={error}
@@ -743,6 +829,8 @@ export default function App() {
 }
 function Editor({
   kind,
+  initialAccountId,
+  initialDate,
   state,
   busy,
   error,
@@ -750,15 +838,21 @@ function Editor({
   save,
 }: {
   kind: Exclude<Modal, null>;
+  initialAccountId?: string;
+  initialDate: string;
   state: State;
   busy: boolean;
   error: string;
   close: () => void;
   save: (fn: (s: State) => void) => Promise<void>;
 }) {
-  const [from, setFrom] = useState(state.accounts[0].id),
-    [to, setTo] = useState(state.accounts[1]?.id ?? ""),
+  const [from, setFrom] = useState(initialAccountId ?? state.accounts[0].id),
+    [to, setTo] = useState(state.accounts.find((a) => a.id !== (initialAccountId ?? state.accounts[0].id))?.id ?? ""),
     [amount, setAmount] = useState(""),
+    [newCategory, setNewCategory] = useState(false),
+    [newName, setNewName] = useState(""),
+    [icon, setIcon] = useState("other"),
+    [color, setColor] = useState("#65a88c"),
     [catKind, setCatKind] = useState<"expense" | "income">("expense"),
     [cat, setCat] = useState(
       state.categories.find((c) => c.kind === kind)?.id ?? "",
@@ -805,8 +899,8 @@ function Editor({
           id: id(),
           name: String(f.get("name")).trim(),
           kind: catKind,
-          color: String(f.get("color")),
-          icon: String(f.get("icon")),
+          color,
+          icon,
         };
         await save((s) => {
           if (
@@ -820,6 +914,8 @@ function Editor({
           s.categories.push(c);
         });
       } else {
+        const created: Category | undefined = newCategory && kind !== "transfer"
+          ? { id: id(), name: newName.trim(), kind, color, icon } : undefined;
         const entry: Entry = {
           id: id(),
           kind,
@@ -834,9 +930,15 @@ function Editor({
                   ? money(String(f.get("received")))
                   : money(amount),
               }
-            : { categoryId: cat }),
+            : { categoryId: created?.id ?? cat }),
         };
         await save((s) => {
+          if (created) {
+            if (!created.name) throw Error("Введите название категории.");
+            if (s.categories.some((c) => c.kind === created.kind && c.name.toLowerCase() === created.name.toLowerCase()))
+              throw Error("Такая категория уже есть.");
+            s.categories.push(created);
+          }
           s.entries.push(entry);
         });
       }
@@ -900,8 +1002,8 @@ function Editor({
               </select>
             </label>
             <p className="help">
-              Новые валюты добавляются в настройках курсов. Валюта счёта
-              фиксируется при создании.
+              Новые валюты добавляются в настройках курсов. Валюту счёта
+              можно изменить во вкладке «Счета» с пересчётом его сумм.
             </p>
             <label>
               Начальный баланс
@@ -929,37 +1031,7 @@ function Editor({
                 <option value="income">Доход</option>
               </select>
             </label>
-            <div className="form-row">
-              <label>
-                Цвет
-                <input type="color" name="color" defaultValue="#65a88c" />
-              </label>
-              <label>
-                Иконка
-                <select name="icon">
-                  {Object.keys(icons).map((key, i) => (
-                    <option key={key} value={key}>
-                      {
-                        [
-                          "Еда",
-                          "Дом",
-                          "Транспорт",
-                          "Здоровье",
-                          "Покупки",
-                          "Досуг",
-                          "Связь",
-                          "Учёба",
-                          "Работа",
-                          "Инвестиции",
-                          "Подарки",
-                          "Другое",
-                        ][i]
-                      }
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
+            <CategoryAppearance icon={icon} color={color} onIcon={setIcon} onColor={setColor} />
           </>
         ) : (
           <>
@@ -1037,10 +1109,10 @@ function Editor({
                     .map((c) => (
                       <button
                         type="button"
-                        className={cat === c.id ? "chosen" : ""}
+                        className={!newCategory && cat === c.id ? "chosen" : ""}
                         key={c.id}
-                        onClick={() => setCat(c.id)}
-                        aria-pressed={cat === c.id}
+                        onClick={() => { setCat(c.id); setNewCategory(false); }}
+                        aria-pressed={!newCategory && cat === c.id}
                       >
                         <span style={{ color: c.color }}>
                           <Symbol category={c} />
@@ -1049,6 +1121,14 @@ function Editor({
                       </button>
                     ))}
                 </div>
+                <button type="button" className="text-button" aria-expanded={newCategory} onClick={() => setNewCategory(!newCategory)}>
+                  <Plus size={18} /> {newCategory ? "Отменить новую категорию" : "Создать категорию"}
+                </button>
+                {newCategory && <div className="inline-category">
+                  <label>Название новой категории<input value={newName} onChange={(e) => setNewName(e.target.value)} required maxLength={80} /></label>
+                  <CategoryAppearance icon={icon} color={color} onIcon={setIcon} onColor={setColor} />
+                  <p className="help">Категория будет сохранена вместе с {kind === "income" ? "доходом" : "расходом"}.</p>
+                </div>}
               </fieldset>
             )}
             <div className="form-row">
@@ -1057,7 +1137,7 @@ function Editor({
                 <input
                   name="date"
                   type="date"
-                  defaultValue={today()}
+                  defaultValue={initialDate}
                   required
                 />
               </label>

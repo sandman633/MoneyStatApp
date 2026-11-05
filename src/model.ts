@@ -22,6 +22,7 @@ export interface Entry {
   categoryId?: string;
   toId?: string;
   received?: number;
+  externalId?: string;
 }
 export interface State {
   version: 1;
@@ -96,14 +97,35 @@ export function balance(s: State, a: Account): number {
 export function rub(s: State, amount: number, currency: string) {
   return Math.round(amount * s.rates[currency]);
 }
-export function totals(s: State, entries: Entry[]) {
+export function convert(s: State, amount: number, from: string, to = "RUB") {
+  if (from === to) return amount;
+  return Math.round((amount * s.rates[from]) / s.rates[to]);
+}
+export function changeAccountCurrency(s: State, accountId: string, currency: string) {
+  const account = s.accounts.find((a) => a.id === accountId);
+  if (!account || !Object.hasOwn(s.rates, currency)) throw Error("Неизвестный счёт или валюта.");
+  if (account.currency === currency) return;
+  const converted = (amount: number) => convert(s, amount, account.currency, currency);
+  const entries = s.entries.map((e) => ({ ...e,
+    ...(e.accountId === accountId ? { amount: converted(e.amount) } : {}),
+    ...(e.kind === "transfer" && e.toId === accountId ? { received: converted(e.received!) } : {}),
+  }));
+  const next: State = { ...s, accounts: s.accounts.map((a) => a.id === accountId ? { ...a, currency, opening: converted(a.opening) } : a), entries };
+  try { validate(next); } catch {
+    throw Error("Нельзя изменить валюту: пересчёт обнуляет небольшую операцию, превышает лимит или создаёт перевод в одной валюте с разными суммами. Исходные данные сохранены.");
+  }
+  s.accounts = next.accounts;
+  s.entries = entries;
+}
+export function totals(s: State, entries: Entry[], currency = "RUB") {
   return entries.reduce(
     (t, e) => {
       if (e.kind !== "transfer")
-        t[e.kind] += rub(
+        t[e.kind] += convert(
           s,
           e.amount,
           s.accounts.find((a) => a.id === e.accountId)!.currency,
+          currency,
         );
       return t;
     },
@@ -170,6 +192,7 @@ export function validate(s: State): void {
       e.amount <= 0 ||
       typeof e.note !== "string" ||
       e.note.length > 300 ||
+      (e.externalId !== undefined && !text(e.externalId, 160)) ||
       !/^\d{4}-\d{2}-\d{2}$/.test(e.date) ||
       !Number.isFinite(Date.parse(e.date)) ||
       new Date(e.date).toISOString().slice(0, 10) !== e.date
