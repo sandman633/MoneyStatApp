@@ -5,6 +5,7 @@ test("аналитика: категории, дни, месяцы, годы, с
   const s = initialState(), accountId = s.accounts[0].id, food = s.categories[0].id;
   s.categories.push({ id: "restaurants", name: "Рестораны", kind: "expense", color: "#65a88c", icon: "utensils" });
   s.entries = [
+    { id: "salary", kind: "income", accountId, categoryId: s.categories.find(c => c.kind === "income")!.id, date: "2026-10-03", amount: 500000, note: "Октябрьская зарплата" },
     { id: "a", kind: "expense", accountId, categoryId: food, date: "2026-10-03", amount: 10000, note: "" },
     { id: "b", kind: "expense", accountId, categoryId: "restaurants", date: "2026-10-03", amount: 20000, note: "" },
     { id: "c", kind: "expense", accountId, categoryId: food, date: "2026-10-15", amount: 30000, note: "" },
@@ -32,6 +33,29 @@ test("аналитика: категории, дни, месяцы, годы, с
   await expect(page.getByRole("tooltip")).toContainText("Нет соответствующей даты");
   await page.getByRole("button", { name: "2026-10-03: 300,00 ₽, операций: 2", exact: true }).click();
   await expect(page.locator(".histogram-detail").first()).toContainText("Рестораны: 200,00");
+  const scroll = page.locator(".histogram-scroll");
+  await scroll.evaluate(el => { el.scrollLeft = 0; });
+  await scroll.hover();
+  await page.mouse.wheel(0, 400);
+  await expect.poll(() => scroll.evaluate(el => el.scrollLeft)).toBeGreaterThan(0);
+  const bars = page.locator(".histogram-pair-bars").first();
+  const left = await bars.locator(".previous-column").boundingBox();
+  const right = await bars.locator(".current-column").boundingBox();
+  expect(left!.x).toBeLessThan(right!.x);
+  await expect(page.locator(".chart-periods button").first()).toContainText("Сравнение");
+  await expect(page.locator(".analytics-table thead th").nth(1)).toHaveText("Период сравнения");
+  const category = page.getByRole("button", { name: "Еда", exact: true });
+  await category.click();
+  await expect(category).toHaveAttribute("aria-expanded", "true");
+  await expect(page.locator(".category-details:visible")).toContainText("15.10.2026");
+  await expect(page.locator(".category-details:visible .category-periods section").first()).toContainText("Период сравнения");
+  await category.click();
+  await expect(page.locator(".category-details:visible")).toHaveCount(0);
+  await page.getByLabel("Тип операций").selectOption("income");
+  await expect(page.getByTestId("analytics-total")).toHaveText("5 000,00 ₽");
+  await page.getByRole("button", { name: "Зарплата", exact: true }).click();
+  await expect(page.locator(".category-details:visible")).toContainText("Октябрьская зарплата");
+  await page.getByLabel("Тип операций").selectOption("expense");
   await page.screenshot({ path: `test-results/analytics-${info.project.name}.png`, fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByRole("combobox", { name: "Разрез", exact: true }).selectOption("month");

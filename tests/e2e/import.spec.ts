@@ -24,7 +24,14 @@ test("импорт Monefy заменяет базу, переводит назв
   await page.getByRole("button", { name: "Обзор", exact: true }).click();
   await expect(page.locator(".entry")).toHaveCount(1);
   await page.getByRole("button", { name: "Настройки", exact: true }).click();
-  await page.getByLabel("CSV истории Monefy").setInputFiles(upload);
+  const transfer = await page.evaluateHandle((text) => {
+    const data = new DataTransfer();
+    data.items.add(new File([text], "monefy.csv", { type: "text/csv" }));
+    return data;
+  }, csv);
+  await page.getByLabel("Перетащите CSV Monefy").dispatchEvent("drop", { dataTransfer: transfer });
+  await transfer.dispose();
+  await expect(page.locator(".import-preview")).toContainText("1 переводов");
   page.once("dialog", (d) => d.accept());
   await page.getByRole("button", { name: "Заменить все данные", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Все данные заменены");

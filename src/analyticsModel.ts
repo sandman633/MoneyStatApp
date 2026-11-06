@@ -30,7 +30,7 @@ export function shiftRange(range: DateRange, months: number): DateRange {
 }
 export type Bucket = { key: string; total: number; count: number; categories: Record<string, number> };
 const keyOf = (value: string, grain: Grain) => value.slice(0, grain === "day" ? 10 : grain === "month" ? 7 : 4);
-export function expenseReport(s: State, range: DateRange, grain: Grain, categoryIds: string[], accountId: string, currency: string) {
+export function expenseReport(s: State, range: DateRange, grain: Grain, categoryIds: string[], accountId: string, currency: string, kind: "expense" | "income" = "expense") {
   if (!validRange(range)) throw Error("Укажите корректные даты: начало не позже окончания.");
   const buckets: Bucket[] = [];
   const cursor = date(grain === "year" ? range.start.slice(0, 4) + "-01-01" : grain === "month" ? range.start.slice(0, 7) + "-01" : range.start);
@@ -44,19 +44,20 @@ export function expenseReport(s: State, range: DateRange, grain: Grain, category
   const byKey = new Map(buckets.map((b) => [b.key, b]));
   const selected = new Set(categoryIds);
   const accounts = new Map(s.accounts.map((a) => [a.id, a]));
-  const categories: Record<string, { total: number; count: number }> = {};
+  const categories: Record<string, { total: number; count: number; entries: { entry: State["entries"][number]; amount: number }[] }> = {};
   const activeDays = new Set<string>();
   let total = 0, count = 0;
   for (const e of s.entries) {
-    if (e.kind !== "expense" || !selected.has(e.categoryId!) || e.date < range.start || e.date > range.end || (accountId !== "all" && e.accountId !== accountId)) continue;
+    if (e.kind !== kind || !selected.has(e.categoryId!) || e.date < range.start || e.date > range.end || (accountId !== "all" && e.accountId !== accountId)) continue;
     const amount = convert(s, e.amount, accounts.get(e.accountId)!.currency, currency);
     const bucket = byKey.get(keyOf(e.date, grain))!;
     bucket.total += amount;
     bucket.count++;
     bucket.categories[e.categoryId!] = (bucket.categories[e.categoryId!] ?? 0) + amount;
-    const c = categories[e.categoryId!] ??= { total: 0, count: 0 };
+    const c = categories[e.categoryId!] ??= { total: 0, count: 0, entries: [] };
     c.total += amount;
     c.count++;
+    c.entries.push({ entry: e, amount });
     total += amount;
     count++;
     activeDays.add(e.date);
@@ -64,10 +65,10 @@ export function expenseReport(s: State, range: DateRange, grain: Grain, category
   const days = Math.round((date(range.end).getTime() - date(range.start).getTime()) / 86400000) + 1;
   return { buckets, categories, total, count, activeDays: activeDays.size, days, average: count ? Math.round(total / count) : 0 };
 }
-export function changeText(current: number, previous: number, currency: string) {
+export function changeText(current: number, previous: number, currency: string, kind: "expense" | "income" = "expense") {
   const delta = current - previous;
   if (!delta) return "Без изменений";
   const money = new Intl.NumberFormat("ru-RU", { style: "currency", currency }).format(Math.abs(delta) / 100);
-  if (!previous) return `Ранее расходов не было · +${money}`;
+  if (!previous) return `Ранее ${kind === "income" ? "доходов" : "расходов"} не было · +${money}`;
   return `${delta > 0 ? "Больше" : "Меньше"} на ${money} (${(Math.abs(delta) / previous * 100).toLocaleString("ru-RU", { maximumFractionDigits: 1 })}%)`;
 }

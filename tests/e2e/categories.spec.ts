@@ -6,6 +6,11 @@ test("новая категория внутри расхода сохраняе
   await page.getByLabel("Сумма · RUB").fill("125");
   await page.getByLabel("Заметка").fill("Утренний кофе");
   await page.getByRole("button", { name: "Создать категорию", exact: true }).click();
+  await expect(page.locator(".category-picker .new-category-tile")).toHaveAttribute("aria-pressed", "true");
+  const note = await page.getByLabel("Заметка").boundingBox();
+  const date = await page.getByLabel("Дата").boundingBox();
+  expect(date!.y).toBeGreaterThan(note!.y);
+  expect(Math.abs(date!.width - note!.width)).toBeLessThan(2);
   await page.getByLabel("Название новой категории").fill("Кофейня");
   await page.getByLabel("Поиск иконки").fill("кофе");
   await page.getByRole("button", { name: "Кофе", exact: true }).click();

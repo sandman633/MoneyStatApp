@@ -71,6 +71,9 @@ export default function App() {
     [periodMode, setPeriodMode] = useState("month"),
     [day, setDay] = useState(today()),
     [category, setCategory] = useState("all"),
+    [historyGroup, setHistoryGroup] = useState<"date" | "category">("date"),
+    [collapsedHistoryGroups, setCollapsedHistoryGroups] = useState<Set<string>>(() => new Set()),
+    [quickAccountId, setQuickAccountId] = useState<string | null>(null),
     [hoverCategory, setHoverCategory] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
     [notice, setNotice] = useState("");
@@ -153,6 +156,23 @@ export default function App() {
   const visible = filtered
     .filter((e) => category === "all" || e.categoryId === category)
     .sort((a, b) => b.date.localeCompare(a.date));
+  const historyGroups = new Map<string, { label: string; entries: Entry[] }>();
+  for (const entry of visible) {
+    const key = historyGroup === "date" ? entry.date : entry.kind === "transfer" ? "transfer" : entry.categoryId!;
+    const label = historyGroup === "date"
+      ? new Date(entry.date + "T12:00:00").toLocaleDateString("ru-RU", { day: "numeric", month: "long", year: "numeric" })
+      : entry.kind === "transfer" ? "Переводы" : s.categories.find((c) => c.id === entry.categoryId)?.name ?? "Категория";
+    if (!historyGroups.has(key)) historyGroups.set(key, { label, entries: [] });
+    historyGroups.get(key)!.entries.push(entry);
+  }
+  function toggleHistoryGroup(key: string) {
+    setCollapsedHistoryGroups((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
   const hovered = s.categories.find((c) => c.id === hoverCategory);
   const overviewMonth = periodMode === "day" ? day.slice(0, 7) : month;
   const monthlyRange = monthRange(overviewMonth);
@@ -161,7 +181,13 @@ export default function App() {
   const monthlyPrevious = hovered ? expenseReport(s, previousMonthlyRange, "month", [hovered.id], account, displayCurrency).total : 0;
   function open(m: Modal) {
     setError("");
+    setQuickAccountId(null);
     setModal(m);
+  }
+  function openForAccount(kind: "expense" | "income", accountId: string) {
+    setError("");
+    setQuickAccountId(accountId);
+    setModal(kind);
   }
   async function remove(e: Entry) {
     if (confirm("Удалить операцию? Балансы счетов будут пересчитаны."))
@@ -534,7 +560,9 @@ export default function App() {
                   История операций{" "}
                   <span className="count">{visible.length}</span>
                 </h2>
-                <select
+                <div className="history-controls"><label>Группировка <select aria-label="Группировка истории" value={historyGroup} onChange={(e) => setHistoryGroup(e.target.value as "date" | "category")}>
+                  <option value="date">По датам</option><option value="category">По категориям</option>
+                </select></label><select
                   aria-label="Фильтр категорий"
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
@@ -545,10 +573,21 @@ export default function App() {
                       {c.name}
                     </option>
                   ))}
-                </select>
+                </select></div>
               </div>
               {visible.length ? (
-                visible.map((e) => {
+                Array.from(historyGroups, ([key, group]) => {
+                  const groupKey = `${historyGroup}:${key}`;
+                  const expanded = !collapsedHistoryGroups.has(groupKey);
+                  const groupTotals = totals(s, group.entries, displayCurrency);
+                  const transferTotal = group.entries.reduce((sum, entry) => {
+                    if (entry.kind !== "transfer") return sum;
+                    const target = s.accounts.find((a) => a.id === entry.toId)!;
+                    const source = s.accounts.find((a) => a.id === entry.accountId)!;
+                    const isTarget = selectedAccount?.id === target.id;
+                    return sum + convert(s, isTarget ? entry.received! : entry.amount, isTarget ? target.currency : source.currency, displayCurrency);
+                  }, 0);
+                  return <div className="history-group" key={groupKey}><h3><button type="button" className="history-group-toggle" aria-expanded={expanded} onClick={() => toggleHistoryGroup(groupKey)}><ChevronRight size={16} aria-hidden="true" className={expanded ? "expanded" : ""} /><span className="history-group-title">{group.label}<span className="count">{group.entries.length}</span></span><span className="history-group-totals">{groupTotals.expense > 0 && <span className="expense-total">−{fmt(groupTotals.expense, displayCurrency)}</span>}{groupTotals.income > 0 && <span className="income-total">+{fmt(groupTotals.income, displayCurrency)}</span>}{transferTotal > 0 && <span>Переводы: {fmt(transferTotal, displayCurrency)}</span>}</span></button></h3>{expanded && group.entries.map((e) => {
                   const source = s.accounts.find((a) => a.id === e.accountId)!,
                     target = s.accounts.find((a) => a.id === e.toId),
                     contextual =
@@ -621,6 +660,7 @@ export default function App() {
                       </button>
                     </div>
                   );
+                })}</div>;
                 })
               ) : (
                 <div className="history-empty">
@@ -660,9 +700,12 @@ export default function App() {
                   </label>
                   <strong>{fmt(balance(s, a), a.currency)}</strong>
                   <p>Начальный баланс: {fmt(a.opening, a.currency)}</p>
-                  <small>
-                    В сводке: {fmt(rub(s, balance(s, a), a.currency))}
-                  </small>
+                  <div className="account-card-bottom"><small>В сводке: {fmt(rub(s, balance(s, a), a.currency))}</small>
+                    <div className="account-quick-actions">
+                      <button type="button" aria-label={`Добавить расход со счёта ${a.name}`} title="Добавить расход" onClick={() => openForAccount("expense", a.id)}><Minus size={20} /></button>
+                      <button type="button" aria-label={`Добавить доход на счёт ${a.name}`} title="Добавить доход" onClick={() => openForAccount("income", a.id)}><Plus size={20} /></button>
+                    </div>
+                  </div>
                 </section>
               ))}
             </div>
@@ -813,7 +856,7 @@ export default function App() {
       {modal && (
         <Editor
           kind={modal}
-          initialAccountId={selectedAccount?.id}
+          initialAccountId={quickAccountId ?? selectedAccount?.id}
           initialDate={periodMode === "day" ? day : today()}
           state={s}
           busy={busy}
@@ -956,6 +999,11 @@ function Editor({
   return (
     <dialog
       className="modal"
+      onClick={(e) => {
+        if (busy || e.target !== e.currentTarget) return;
+        const bounds = e.currentTarget.getBoundingClientRect();
+        if (e.clientX < bounds.left || e.clientX > bounds.right || e.clientY < bounds.top || e.clientY > bounds.bottom) close();
+      }}
       onCancel={(e) => {
         e.preventDefault();
         if (!busy) close();
@@ -1120,10 +1168,11 @@ function Editor({
                         {c.name}
                       </button>
                     ))}
+                  <button type="button" className={`new-category-tile${newCategory ? " chosen" : ""}`} aria-pressed={newCategory} aria-expanded={newCategory} onClick={() => setNewCategory(!newCategory)}>
+                    <span><Plus size={22} /></span>
+                    Создать категорию
+                  </button>
                 </div>
-                <button type="button" className="text-button" aria-expanded={newCategory} onClick={() => setNewCategory(!newCategory)}>
-                  <Plus size={18} /> {newCategory ? "Отменить новую категорию" : "Создать категорию"}
-                </button>
                 {newCategory && <div className="inline-category">
                   <label>Название новой категории<input value={newName} onChange={(e) => setNewName(e.target.value)} required maxLength={80} /></label>
                   <CategoryAppearance icon={icon} color={color} onIcon={setIcon} onColor={setColor} />
@@ -1131,25 +1180,8 @@ function Editor({
                 </div>}
               </fieldset>
             )}
-            <div className="form-row">
-              <label>
-                Дата
-                <input
-                  name="date"
-                  type="date"
-                  defaultValue={initialDate}
-                  required
-                />
-              </label>
-              <label>
-                Заметка
-                <input
-                  name="note"
-                  placeholder="Необязательно"
-                  maxLength={300}
-                />
-              </label>
-            </div>
+            <label>Заметка<input name="note" placeholder="Необязательно" maxLength={300} /></label>
+            <label>Дата<input name="date" type="date" defaultValue={initialDate} required /></label>
           </>
         )}
         <button

@@ -47,3 +47,24 @@ describe("аналитика расходов", () => {
     expect(changeText(150, 100, "RUB")).toContain("50%");
   });
 });
+
+it("доходы и детализация учитывают период, счёт и конвертацию без изменения записей", () => {
+  const s = initialState(), accountId = s.accounts[0].id, categoryId = s.categories.find(c => c.kind === "income")!.id;
+  s.accounts.push({ id: "usd", name: "USD", currency: "USD", opening: 0 });
+  s.entries = [
+    { id: "salary", kind: "income", accountId, categoryId, date: "2026-10-01", amount: 9000, note: "Зарплата" },
+    { id: "usd-income", kind: "income", accountId: "usd", categoryId, date: "2026-10-02", amount: 100, note: "" },
+    { id: "outside", kind: "income", accountId, categoryId, date: "2026-09-30", amount: 5000, note: "" },
+    { id: "expense", kind: "expense", accountId, categoryId: s.categories[0].id, date: "2026-10-01", amount: 1000, note: "" },
+    { id: "transfer", kind: "transfer", accountId, toId: "usd", date: "2026-10-01", amount: 9000, received: 100, note: "" },
+  ];
+  const snapshot = JSON.stringify(s), range = monthRange("2026-10");
+  const report = expenseReport(s, range, "day", [categoryId], "all", "USD", "income");
+  expect(report.total).toBe(200);
+  expect(report.count).toBe(2);
+  expect(report.categories[categoryId].entries.map(row => [row.entry.id, row.amount])).toEqual([["salary", 100], ["usd-income", 100]]);
+  expect(expenseReport(s, range, "day", [categoryId], accountId, "USD", "income").total).toBe(100);
+  expect(expenseReport(s, range, "day", [], "all", "RUB", "income").count).toBe(0);
+  expect(changeText(100, 0, "RUB", "income")).toContain("Ранее доходов не было");
+  expect(JSON.stringify(s)).toBe(snapshot);
+});
